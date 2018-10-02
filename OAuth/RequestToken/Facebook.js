@@ -47,7 +47,6 @@ function requestToken(user_id, short_lived_token, done){
         //step 2: authenticate user with twitter
         const data = JSON.parse(body);
         if(data && data["access_token"]){
-            console.log(data["access_token"]);
             saveOAuthToken(user_id, 2, data["access_token"]).then(()=>{
                 done();
             })

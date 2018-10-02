@@ -17,8 +17,11 @@ const fb = require('./models/fb');
  * @param timelineEnum 1 for user timeline, 2 for home timeline
  * @param jwtToken user JWT token
  * @param res reference to the Reponse object from RequestHandler
+ * @param twitter_max_id return results with an ID less than (that is, older than) or equal to the specified ID
+ * @param fb_nextUrl url to call to get the next batch of feeds from facebook
  */
-function TryLoadAll(timelineEnum, jwtToken, res){
+function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
+    let isInitialLoad = twitter_max_id=='undefined' && fb_nextUrl == 'undefined';
     jwt.verify(jwtToken, process.env.JWT_SECRET, (err, authData)=>{
         if(err){
             res.sendStatus(403);
@@ -27,10 +30,10 @@ function TryLoadAll(timelineEnum, jwtToken, res){
             .then(([Twitter, Facebook])=>{
                 let promises = [];
                 if(Twitter && Twitter.token && Twitter.secret){
-                    promises.push(loadTwitterTimeline(authData.user, timelineEnum, Twitter.info, Twitter.token, Twitter.secret, Twitter.valid)); 
+                    promises.push(loadTwitterTimeline(authData.user, timelineEnum, Twitter.info, Twitter.token, Twitter.secret, Twitter.valid, twitter_max_id)); 
                 }
                 if(Facebook && Facebook.token){
-                    promises.push(loadFBTimeline(authData.user, timelineEnum, Facebook.info, Facebook.token, Facebook.secret, Facebook.valid));
+                    promises.push(loadFBTimeline(authData.user, timelineEnum, Facebook.info, Facebook.token, Facebook.secret, Facebook.valid, fb_nextUrl));
                 }
                 
                 if(promises.length == 0){
@@ -52,16 +55,23 @@ function TryLoadAll(timelineEnum, jwtToken, res){
                             error.push(feedArray.error);
                         }
                     })
-                    if(finalArray.length == 0){
+                    
+                    //only return Auth Required when refreshing or during initial load
+                    //during Load More, we'll not return the error
+                    if(finalArray.length == 0 && isInitialLoad){
                         res.json({
-                            success: false,
-                            result: null,
+                            success: error.length == 0,
+                            result: {
+                                array: finalArray,
+                                additionalInfo: additionalInfo,
+                            },
                             authError: error.length>0?error:null,
                         });
                     }else{
                         finalArray.sort((a,b)=>{
                             return b.time_UTC - a.time_UTC;
                         })
+
                         res.json({
                             success: true,
                             result: {
@@ -136,19 +146,32 @@ function TryLoadTimeline(appEnum, timelineEnum, jwtToken, res){
     });
 }
 
-function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid){
+function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid, fb_nextUrl){
     return new Promise((resolve, reject)=>{
         let url = undefined;
         let fields = 'created_time,link,name,message,from.fields(name,picture{url}),full_picture';
-        switch(timelineEnum){
-            case TimelineEnum.home_timeline:
-                url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=15&access_token=${token}`;
-                break;
-            case TimelineEnum.user_timeline:
-            default:
-                url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=15&access_token=${token}`;
-                break;
+        if(fb_nextUrl=='undefined'){
+            switch(timelineEnum){
+                case TimelineEnum.home_timeline:
+                    url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=10&access_token=${token}`;
+                    break;
+                case TimelineEnum.user_timeline:
+                default:
+                    url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=10&access_token=${token}`;
+                    break;
+            }
+        }else if(!fb_nextUrl){  //done with loading more
+            resolve({
+                array: [],
+                additionalInfo: {
+                    nextUrl: "",
+                }
+            });
+            return;
+        }else{
+            url = fb_nextUrl;
         }
+
         const options = {
             url: url,
             headers:{
@@ -189,7 +212,7 @@ function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid){
     })
 }
 
-function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenValid){
+function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenValid, twitter_max_id){
     return new Promise((resolve, reject)=>{
         let url=undefined;
         switch(timelineEnum){
@@ -215,9 +238,15 @@ function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenVali
             qs:{
                 screen_name: query.screen_name,
                 user_id: query.user_id,
-                count:15,
+                count:10,
             },
             json:true
+        }
+        let discardTop = false;
+        if(twitter_max_id!=='undefined'){
+            options.qs.max_id = twitter_max_id;
+            discardTop = true;
+            options.qs.count ++;
         }
         request.get(options, (err,res,body)=>{
             if(err) reject(err);
@@ -246,8 +275,12 @@ function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenVali
                 let resultArray=[];
                 let max_id='';
                 body.forEach(object=>{
-                    resultArray.push((new tweet(object)).toJson());
-                    max_id = object.id_str;
+                    if(discardTop){
+                        discardTop=false;
+                    }else{
+                        resultArray.push((new tweet(object)).toJson());
+                        max_id = object.id_str;
+                    }
                 })
                 let result = {
                     array: resultArray,
