@@ -159,8 +159,20 @@ function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid){
         request.get(options, (err,res,body)=>{
             if(err) reject(err);
             else{
+                if(body.error){
+                    if(body.error.code == 190 && tokenValid){
+                        invalidateOAuthToken(user, 2);
+                    }
+                    
+                    resolve({
+                        inValidToken: true,
+                        error: body.error,
+                    })
+                    return;
+                }
+
                 let array = body.data;
-                let nextUrl = body.paging.next;
+                let nextUrl = body.paging?body.paging.next:"";
                 let resultArray = [];
                 array.forEach(object=>{
                     resultArray.push((new fb(object)).toJson());
