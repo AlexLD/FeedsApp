@@ -1,6 +1,5 @@
 const request = require('request');
 const qs = require('querystring');
-const config = require('../OAuth/config');
 const jwt = require('jsonwebtoken');
 const twitter = require('twitter-text');
 const cache = require('../Cache/Cache');
@@ -196,8 +195,8 @@ function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenVali
                 'Content-Type':'application/json'
             },
             oauth:{
-                consumer_key: config.twitter.clientID,
-                consumer_secret: config.twitter.clientSecret,
+                consumer_key: process.env.TWITTER_APP_ID,
+                consumer_secret: process.env.TWITTER_APP_SECRET,
                 token:token,
                 token_secret:secret
             },
