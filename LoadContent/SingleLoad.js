@@ -6,12 +6,12 @@ const { TimelineEnum, TryLoadAll } = require('./shared');
 router.use(jwtMiddleWare);
 router.get('/User',(req,res)=>{
     const query = req.query;
-    TryLoadAll(TimelineEnum.user_timeline, req.token, res, query.twitter_max_id, query.fb_nextUrl);
+    TryLoadAll(TimelineEnum.user_timeline, req.token, res, query.twitter_max_id, query.fb_max_time);
 });
 
 router.get('/Home',(req,res)=>{
     const query = req.query;
-    TryLoadAll(TimelineEnum.home_timeline, req.token, res, query.twitter_max_id, query.fb_nextUrl);
+    TryLoadAll(TimelineEnum.home_timeline, req.token, res, query.twitter_max_id, query.fb_max_time);
 });
 
 module.exports = router;

@@ -12,16 +12,17 @@ const AppEnum = {"twitter":1, "facebook":2};
 const tweet = require('./models/tweet');
 const fb = require('./models/fb');
 
+const RESULT_COUNT = 10;
 /**
  * Load time line from all social media accounts
  * @param timelineEnum 1 for user timeline, 2 for home timeline
  * @param jwtToken user JWT token
  * @param res reference to the Reponse object from RequestHandler
  * @param twitter_max_id return results with an ID less than (that is, older than) or equal to the specified ID
- * @param fb_nextUrl url to call to get the next batch of feeds from facebook
+ * @param fb_max_time return results with a timestamp older than or equal to the specified time
  */
-function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
-    let isInitialLoad = twitter_max_id=='undefined' && fb_nextUrl == 'undefined';
+function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_max_time){
+    let isInitialLoad = twitter_max_id=='undefined' && fb_max_time == 'undefined';
     jwt.verify(jwtToken, process.env.JWT_SECRET, (err, authData)=>{
         if(err){
             res.sendStatus(403);
@@ -33,7 +34,7 @@ function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
                     promises.push(loadTwitterTimeline(authData.user, timelineEnum, Twitter.info, Twitter.token, Twitter.secret, Twitter.valid, twitter_max_id)); 
                 }
                 if(Facebook && Facebook.token){
-                    promises.push(loadFBTimeline(authData.user, timelineEnum, Facebook.info, Facebook.token, Facebook.secret, Facebook.valid, fb_nextUrl));
+                    promises.push(loadFBTimeline(authData.user, timelineEnum, Facebook.info, Facebook.token, Facebook.secret, Facebook.valid, fb_max_time));
                 }
                 
                 if(promises.length == 0){
@@ -45,12 +46,10 @@ function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
                 }
                 Promise.all(promises).then(allFeeds=>{
                     let finalArray = [];
-                    let additionalInfo = [];
                     let error = [];
                     allFeeds.forEach(feedArray=>{
                         if(!feedArray.inValidToken){
-                            finalArray = finalArray.concat(feedArray.array);
-                            additionalInfo = additionalInfo.concat(feedArray.additionalInfo);
+                            finalArray = finalArray.concat(feedArray);
                         }else{
                             error.push(feedArray.error);
                         }
@@ -61,10 +60,7 @@ function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
                     if(finalArray.length == 0 && isInitialLoad){
                         res.json({
                             success: error.length == 0,
-                            result: {
-                                array: finalArray,
-                                additionalInfo: additionalInfo,
-                            },
+                            result: finalArray,
                             authError: error.length>0?error:null,
                         });
                     }else{
@@ -74,10 +70,7 @@ function TryLoadAll(timelineEnum, jwtToken, res, twitter_max_id, fb_nextUrl){
 
                         res.json({
                             success: true,
-                            result: {
-                                array: finalArray,
-                                additionalInfo: additionalInfo,
-                            }
+                            result: finalArray.slice(0,10),  //return the first 10
                         });
                     }
                     
@@ -124,10 +117,7 @@ function TryLoadTimeline(appEnum, timelineEnum, jwtToken, res){
                         }else{
                             res.json({
                                 success: true,
-                                result: {
-                                    array: body.array,
-                                    additionalInfo: body.additionalInfo,
-                                }
+                                result: body,
                             });
                         }
                     }).catch(err=>{
@@ -146,30 +136,30 @@ function TryLoadTimeline(appEnum, timelineEnum, jwtToken, res){
     });
 }
 
-function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid, fb_nextUrl){
+function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid, fb_max_time){
     return new Promise((resolve, reject)=>{
         let url = undefined;
-        let fields = 'created_time,link,name,message,from.fields(name,picture{url}),full_picture';
-        if(fb_nextUrl=='undefined'){
-            switch(timelineEnum){
-                case TimelineEnum.home_timeline:
-                    url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=10&access_token=${token}`;
-                    break;
-                case TimelineEnum.user_timeline:
-                default:
-                    url=`https://graph.facebook.com/me/feed?fields=${fields}&limit=10&access_token=${token}`;
-                    break;
-            }
-        }else if(!fb_nextUrl){  //done with loading more
-            resolve({
-                array: [],
-                additionalInfo: {
-                    nextUrl: "",
-                }
-            });
+        let fields = 'created_time,link,name,message,from{name,picture{url}},full_picture'; //'from.fields(name,picture{url})';
+        
+        switch(timelineEnum){
+            case TimelineEnum.home_timeline:
+                url=`https://graph.facebook.com/me/feed?fields=${fields}&access_token=${token}`;
+                break;
+            case TimelineEnum.user_timeline:
+            default:
+                url=`https://graph.facebook.com/me/feed?fields=${fields}&access_token=${token}`;
+                break;
+        }
+        
+        let discardTop = false;
+        if(!fb_max_time){                              //done loading more
+            resolve([]);
             return;
-        }else{
-            url = fb_nextUrl;
+        }else if(fb_max_time!=='undefined'){           //load more
+            url = `${url}&limit=${RESULT_COUNT+1}&until=${fb_max_time}`;
+            discardTop = true;
+        }else{                                         //initial load, return 10 posts
+            url = `${url}&limit=${RESULT_COUNT}`;
         }
 
         const options = {
@@ -183,10 +173,9 @@ function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid, fb
             if(err) reject(err);
             else{
                 if(body.error){
-                    if(body.error.code == 190 && tokenValid){
+                    if(body.error.code == 190 && tokenValid){  //code 190: token expired
                         invalidateOAuthToken(user, 2);
                     }
-                    
                     resolve({
                         inValidToken: true,
                         error: body.error,
@@ -195,18 +184,16 @@ function loadFBTimeline(user, timelineEnum, query, token, secret, tokenValid, fb
                 }
 
                 let array = body.data;
-                let nextUrl = body.paging?body.paging.next:"";
                 let resultArray = [];
                 array.forEach(object=>{
-                    resultArray.push((new fb(object)).toJson());
-                });
-                let result = {
-                    array: resultArray,
-                    additionalInfo: {
-                        nextUrl: nextUrl,
+                    if(discardTop){
+                        discardTop = false;
+                    }else{
+                        resultArray.push((new fb(object)).toJson());
                     }
-                }
-                resolve(result);
+                });
+                
+                resolve(resultArray);
             } 
         });
     })
@@ -238,12 +225,16 @@ function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenVali
             qs:{
                 screen_name: query.screen_name,
                 user_id: query.user_id,
-                count:10,
+                count: RESULT_COUNT,                            //return 10 posts
             },
             json:true
         }
+
         let discardTop = false;
-        if(twitter_max_id!=='undefined'){
+        if(!twitter_max_id){                        //done loading more
+            resolve([]);
+            return;
+        }else if(twitter_max_id!=='undefined'){     // load more
             options.qs.max_id = twitter_max_id;
             discardTop = true;
             options.qs.count ++;
@@ -273,22 +264,15 @@ function loadTwitterTimeline(user, timelineEnum, query, token, secret, tokenVali
                     saveOAuthToken(user, 1, token, secret, query);
                 }
                 let resultArray=[];
-                let max_id='';
                 body.forEach(object=>{
                     if(discardTop){
                         discardTop=false;
                     }else{
                         resultArray.push((new tweet(object)).toJson());
-                        max_id = object.id_str;
                     }
                 })
-                let result = {
-                    array: resultArray,
-                    additionalInfo: {
-                        max_id: max_id,
-                    }
-                }
-                resolve(result);
+                
+                resolve(resultArray);
             } 
         });
     });

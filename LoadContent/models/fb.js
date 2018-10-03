@@ -5,6 +5,7 @@ class fb extends feed{
     constructor(object){
         super(object);
         this.id = object.id;
+        this.type = 2;
         this.time = this.getDateString(object.created_time);
         this.time_UTC = this.getDateUTC(object.created_time);
         this.text = object.name;

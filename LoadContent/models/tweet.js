@@ -5,6 +5,7 @@ class tweet extends feed{
     constructor(object){
         super(object);
         this.id = object.id_str;
+        this.type = 1;
         this.time = this.getDateString(object.created_at);
         this.time_UTC = this.getDateUTC(object.created_at);
         this.text = object.text;

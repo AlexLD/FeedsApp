@@ -5,6 +5,7 @@ class feed{
     toJson(){
         return {
             id: this.id,
+            type: this.type,
             time: this.time,
             time_UTC: this.time_UTC,
             user: this.user,
