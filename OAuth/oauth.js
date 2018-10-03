@@ -28,6 +28,11 @@ function saveOAuthToken(user_id, account, token, secret, info){
     })
 }
 
+/**
+ * mark token as invalid in the database
+ * @param user_id user id
+ * @param account 1 for twitter, 2 for facebook
+ */
 function invalidateOAuthToken(user_id, account){
     connectToDatabase().then(dbo=>{
         dbo.collection("oauth_tokens").updateOne({user_id:user_id, account:account},{
@@ -39,6 +44,11 @@ function invalidateOAuthToken(user_id, account){
         cache.deleteCacheOneToken(user_id, account);
     });
 }
+
+/**
+ * get user's oauth tokens from cache
+ * @param user_id user id
+ */
 function getAllOAuthTokens(user_id){
     return new Promise((resolve,reject)=>{
         cache.getAllOAuthTokens(user_id).then(result=>{

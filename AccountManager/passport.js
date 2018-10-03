@@ -30,6 +30,10 @@ passport.use(new localStrategy(
     }
 ));
 
+/**
+ * Looks for user with 'user' as username or email from database
+ * @param user username or email
+ */
 function findUser(user){
     return new Promise((resolve,reject)=>{
         connectToDatabase().then(dbo=>{
@@ -43,6 +47,9 @@ function findUser(user){
     })
  };
 
+ /**
+  * Middleware used by APIs across the application
+  */
  function jwtMiddleWare(req,res,next){
      const tokenHeader = req.headers['authorization'];
      if(typeof tokenHeader !== 'undefined'){

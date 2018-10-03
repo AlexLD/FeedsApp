@@ -31,6 +31,10 @@ router.post('/',(req,res)=>{
     })
 })
 
+/**
+ * checks whether user name or email is already used, if not, hashes password and stores everything in database
+ * @param user user object containing userName, email and password
+ */
 function registerUser(user){
     return new Promise((resolve,reject)=>{
         findUser({username:user.userName, email:user.email}).then(results=>{
